@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kimi 文件分析</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        body {
+            font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+            background-color: #f4f4f4;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .container {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            text-align: center;
+            width: 90%;
+            max-width: 900px;
+        }
+        input[type="file"] {
+            margin-bottom: 10px;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            background-color: #007BFF;
+            color: white;
+            border: none;
+            border-radius: 4px;
+        }
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        .loading {
+            margin-top: 20px;
+            font-size: 14px;
+            color: #555;
+            display: none;
+        }
+        .result {
+            margin-top: 20px;
+            width: 95%;
+            height: 400px;
+            font-size: 15px;
+            line-height: 1.6;
+            color: #333;
+            background-color: #fff;
+            border: 1px solid #e8e8e8;
+            border-radius: 4px;
+            padding: 20px;
+            overflow-y: auto;
+            text-align: left;
+        }
+        .result h1, .result h2, .result h3 {
+            border-bottom: 1px solid #ddd;
+            padding-bottom: 5px;
+            margin-bottom: 10px;
+        }
+        .result table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 16px 0;
+            font-size: 14px;
+        }
+        .result th, .result td {
+            border: 1px solid #e1e4e8;
+            padding: 10px;
+            text-align: left;
+        }
+        .result th {
+            background-color: #f6f8fa;
+            font-weight: 600;
+        }
+        .result tr:nth-child(even) {
+            background-color: #fafbfc;
+        }
+        .result tr:hover {
+            background-color: #f6f8fa;
+        }
+        .result pre {
+            background: #f6f8fa;
+            padding: 10px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+        .result code {
+            font-family: monospace;
+            background: #f4f4f4;
+            padding: 2px 4px;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>红外巡检报告分析工具</h1>
+        <p>上传红外巡检巡检报告（PDF）， 将为您生成分析诊断报告。</p>
+        <input type="file" id="fileInput" accept="application/pdf,image/jpeg">
+        <button id="uploadButton" disabled>上传文件并分析</button>
+        <div id="loading" class="loading">正在处理，请稍候...</div>
+        <div id="result" class="result"></div>
+    </div>
+
+    <script>
+        // 配置 marked 选项
+        marked.setOptions({
+            breaks: true,
+            gfm: true,
+            tables: true,
+            xhtml: true
+        });
+
+        const API_KEY = "API-KEY";
+        const BASE_URL = "Your Agents URLs";
+
+        document.getElementById('fileInput').addEventListener('change', function () {
+            document.getElementById('uploadButton').disabled = this.files.length === 0;
+        });
+
+        document.getElementById('uploadButton').addEventListener('click', async function () {
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];
+            const loading = document.getElementById('loading');
+            const resultDiv = document.getElementById('result');
+
+            if (!file) {
+                alert('请选择一个文件！');
+                return;
+            }
+
+            loading.style.display = 'block';
+            resultDiv.innerHTML = '';
+
+            try {
+                const fileId = await uploadFile(file);
+                const fileContent = await fetchFileContent(fileId);
+                const report = await analyzeFile(fileContent);
+
+                // 解析 Markdown 并显示 HTML
+                resultDiv.innerHTML = marked.parse(report);
+            } catch (error) {
+                resultDiv.innerHTML = `<p style="color: red;">发生错误：${error.message}</p>`;
+            } finally {
+                loading.style.display = 'none';
+            }
+        });
+
+        async function uploadFile(file) {
+            const formData = new FormData();
+            formData.append('file', file);
+
+            const response = await fetch(`${BASE_URL}/files`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${API_KEY}` },
+                body: formData
+            });
+
+            if (!response.ok) {
+                throw new Error('文件上传失败');
+            }
+
+            const data = await response.json();
+            return data.id;
+        }
+
+        async function fetchFileContent(fileId) {
+            const response = await fetch(`${BASE_URL}/files/${fileId}/content`, {
+                method: 'GET',
+                headers: { 'Authorization': `Bearer ${API_KEY}` }
+            });
+
+            if (!response.ok) {
+                throw new Error('无法获取文件内容');
+            }
+
+            return response.text();
+        }
+
+        async function analyzeFile(fileContent) {
+            const response = await fetch(`${BASE_URL}/chat/completions`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${API_KEY}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    model: 'moonshot-v1-8k',
+                    messages: [
+                        { role: 'system', content: '你是 Kimi，专注于配电设备红外热故障的检测。' },
+                        { role: 'system', content: fileContent },
+                        { role: 'user', content: '请生成一份红外巡检检测报告，报告内容参考：\n\n 红外巡检诊断报告：\n- 报告编号：\n- 巡检状态：\n- 巡检方式：\n- 开始时间：\n- 结束时间：\n- 设备名称：\n- 设备类别：\n- 安装位置：\n- 操作人：\n- 报告日期：\n\n巡检内容：\n1. 温度检测：\n| 时间 | 平均温度（℃） |\n|------|--------------|\n\n\n2. 成像检测：\n- 红外成像图：\n- 可见光成像图：\n\n数据分析：\n1. 红外特征分析：\n- 最高温度\n- 最低温度\n- 平均温度\n- 温度波动范围\n- 标准差\n\n2. 诊断分析：\n- 关注温度异常点，是否存在异常热斑或过热区域。\n- 设备外观是否完整，有无损坏或异常。\n\n结论：\n- 请提供基于分析的诊断结论和处理建议。' }
+                      ]
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error('分析失败');
+            }
+
+            const data = await response.json();
+            return data.choices[0].message.content;
+        }
+    </script>
+</body>
+</html>
